@@ -349,17 +349,18 @@ class DepthMetric(nn.Module):
         self.count += 1
 
     def _after_epoch(self):
-        dist.barrier()
-        dist.all_reduce(self.count)
-        dist.all_reduce(self.abs_rel)
-        dist.all_reduce(self.sq_rel)
-        dist.all_reduce(self.rmse)
-        dist.all_reduce(self.rmse_log)
-        dist.all_reduce(self.a1)
-        dist.all_reduce(self.a2)
-        dist.all_reduce(self.a3)
-        dist.all_reduce(self.scaling)
-        dist.barrier()
+        if dist.is_initialized():
+            dist.barrier()
+            dist.all_reduce(self.count)
+            dist.all_reduce(self.abs_rel)
+            dist.all_reduce(self.sq_rel)
+            dist.all_reduce(self.rmse)
+            dist.all_reduce(self.rmse_log)
+            dist.all_reduce(self.a1)
+            dist.all_reduce(self.a2)
+            dist.all_reduce(self.a3)
+            dist.all_reduce(self.scaling)
+            dist.barrier()
         
         abs_rel = self.abs_rel / self.count
         sq_rel = self.sq_rel / self.count

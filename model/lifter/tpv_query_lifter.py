@@ -15,6 +15,9 @@ class TPVQueryLifter(BaseLifter):
         init_cfg=None, 
         **kwargs) -> None:
 
+        """ 
+            Directly initialize tpv features as learnable parameters.
+        """
         super().__init__(init_cfg, **kwargs)
         self.tpv_h = tpv_h
         self.tpv_w = tpv_w

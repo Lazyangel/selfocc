@@ -93,7 +93,7 @@ class Kitti_One_Frame:
 
         for sequence in self.sequences:
             pose_path = os.path.join(self.root, "dataset", "poses", sequence + ".txt")
-            gt_global_poses = read_poses(pose_path)
+            gt_global_poses = read_poses(pose_path) # T_2_T0 每一帧到第0帧的变换矩阵，世界坐标系原点为cam0
 
             calib = read_calib(
                 os.path.join(self.root, "dataset", "sequences", sequence, "calib.txt")
@@ -102,7 +102,7 @@ class Kitti_One_Frame:
 
             T_cam0_2_cam2 = calib['T_cam0_2_cam2']
             T_cam2_2_cam0 = np.linalg.inv(T_cam0_2_cam2)
-            T_velo_2_cam = T_cam0_2_cam2 @ calib["Tr"]
+            T_velo_2_cam = T_cam0_2_cam2 @ calib["Tr"] # cam0_2_cam2 @ velo_2_cam0 --> velo_2_cam2
 
             if split == "val":
                 glob_path = os.path.join(
@@ -119,7 +119,7 @@ class Kitti_One_Frame:
 
             max_length = 0
             min_length = 50
-            paired_dists = {}
+            paired_dists = {} # 记录当前帧和前一帧的距离，如果没有前一帧，距离为0
             dist_step = 1 if split == 'train' else 5
             for seq_img_path in seq_img_paths:
                 filename = os.path.basename(seq_img_path)
@@ -132,7 +132,7 @@ class Kitti_One_Frame:
                 else:
                     curr_pose = gt_global_poses[int(frame_id)]
                     prev_pose = gt_global_poses[int(prev_frame_id)]
-                    prev_xyz = dump_xyz(prev_pose)
+                    prev_xyz = dump_xyz(prev_pose) 
                     curr_xyz = dump_xyz(curr_pose)
                     rel_distance = np.sqrt(
                         (prev_xyz[0] - curr_xyz[0]) ** 2 + (prev_xyz[2] - curr_xyz[2]) ** 2)

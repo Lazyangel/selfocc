@@ -10,7 +10,8 @@ import torch
 
 
 def build_openseed_model():
-    args = 'evaluate --conf_files config/openseed/openseed_swint_lang.yaml --overrides WEIGHT ckpts/openseed_model_state_dict_swint_51.2ap.pt'
+    # args = 'evaluate --conf_files config/openseed/openseed_swint_lang.yaml --overrides WEIGHT ckpts/openseed_model_state_dict_swint_51.2ap.pt'
+    args = 'evaluate --conf_files config/openseed/openseed_swint_lang.yaml --overrides WEIGHT ckpts/model_state_dict_swint_51.2ap.pt'
     opt, cmdline_args = load_opt_command(args.split())
     pretrained_pth = os.path.join(opt['WEIGHT'])
     model = BaseModel(opt, build_model(opt)).from_pretrained(pretrained_pth).eval().cuda()

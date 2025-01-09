@@ -104,16 +104,16 @@ class TPVSegmentor(CustomBaseSegmentor):
             'metas': metas,
             'points': points
         }
-        results.update(kwargs)
+        results.update(kwargs) # kwargs 更新到 results
         outs = self.extract_img_feat(**results)
         # outs['ms_img_feats'] = [feat.float() for feat in outs['ms_img_feats']]
         results.update(outs)
         if img_feat_only:
             return results['ms_img_feats_backbone']
         # with torch.cuda.amp.autocast(enabled=False):
-        outs = self.lifter(**results)
+        outs = self.lifter(**results)# TPV query lifter 
         results.update(outs)
-        outs = self.encoder(**results)
+        outs = self.encoder(**results) 
         results.update(outs)
         if occ_only and hasattr(self.head, "forward_occ"):
             outs = self.head.forward_occ(**results)
