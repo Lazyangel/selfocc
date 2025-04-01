@@ -23,7 +23,7 @@ class NeuSHead(BaseTaskHead):
 
     def __init__(
             self, 
-            roi_aabb,
+            roi_aabb, # 三维空间范围
             resolution=0.4,
             near_plane=0.0,
             far_plane=1e10,
@@ -60,8 +60,8 @@ class NeuSHead(BaseTaskHead):
 
             # rays args
             ray_sample_mode='fixed',    # fixed, cellular
-            ray_number=[192, 400],      # 192 * 400
-            ray_img_size=[768, 1600],
+            ray_number=[192, 400],      # 192 * 400(nus) 55 * 190(kitti)
+            ray_img_size=[768, 1600],   
             ray_upper_crop=0,
             ray_x_dsr_max=None,
             ray_y_dsr_max=None,
@@ -104,6 +104,9 @@ class NeuSHead(BaseTaskHead):
             two_split=True,
             tpv=False,
             using_2d_img_feats=False,
+            
+            # temporal tpv feature fuse
+            use_fused_tpv=False,
             **kwargs):
         super().__init__(init_cfg, **kwargs)
 
@@ -153,7 +156,7 @@ class NeuSHead(BaseTaskHead):
 
             disp_sampler=disp_sampler,
             return_sem=return_sem,
-
+            
             sdf_field=SDFCustomFieldConfig(
                 beta_init = beta_init,
                 # beta_hand_tune=beta_hand_tune,
@@ -183,6 +186,7 @@ class NeuSHead(BaseTaskHead):
                 use_compact_2nd_grad=use_compact_2nd_grad,
                 using_2d_img_feats=using_2d_img_feats,
                 return_sem=return_sem,
+                use_fused_tpv=use_fused_tpv,
             ),
         )
 
@@ -207,12 +211,22 @@ class NeuSHead(BaseTaskHead):
         self.return_sem = return_sem
 
         self.estimate_flow = estimate_flow
-        self.z_size = self.model.field.mapping.size_d
+        self.z_size = self.model.field.mapping.size_d # 33
         self.bev_size = [self.model.field.mapping.size_h, self.model.field.mapping.size_w]
+        # self.occ_size = [self.model.field.mapping.size_h, self.model.field.mapping.size_w, self.model.field.mapping.size_d]
         self.two_split = two_split
         self.using_2d_img_feats = using_2d_img_feats
 
-        if estimate_flow:
+        if estimate_flow: 
+            self.flow_net_3d = nn.Sequential(
+                nn.Conv3d(in_channels=2*embed_dims, out_channels=embed_dims, kernel_size=3, stride=1, padding=1, bias=False),
+                nn.BatchNorm3d(embed_dims),
+                nn.ReLU(True),
+                nn.Conv3d(in_channels=embed_dims, out_channels=embed_dims, kernel_size=3, stride=1, padding=1, bias=False),
+                nn.BatchNorm3d(embed_dims),
+                nn.ReLU(True),
+                nn.Conv3d(in_channels=embed_dims, out_channels=3, kernel_size=1)
+            )
             # self.flow_net = nn.Sequential(
             #     nn.Conv2d(embed_dims*2, embed_dims, 3, 1, 1, bias=False),
             #     nn.BatchNorm2d(embed_dims),
@@ -221,19 +235,37 @@ class NeuSHead(BaseTaskHead):
             #     nn.BatchNorm2d(embed_dims),
             #     nn.ReLU(True),
             #     nn.Conv2d(embed_dims, self.z_size * 3, 1))
-            flow_net = [
-                nn.Conv2d(embed_dims*2, embed_dims, 3, 1, 1, bias=False),
-                nn.BatchNorm2d(embed_dims),
-                nn.ReLU(True),
-                nn.Conv2d(embed_dims, embed_dims, 3, 1, 1, bias=False),
-                nn.BatchNorm2d(embed_dims),
-                nn.ReLU(True)]
-            last_lin = nn.Conv2d(embed_dims, self.z_size * 3, 1)
-            nn.init.normal_(last_lin.weight.data, 0., 1e-2)
-            nn.init.constant_(last_lin.bias.data, 0.)
-            flow_net.append(last_lin)
-            self.flow_net = nn.Sequential(*flow_net)
-
+            # flow_net = [
+            #     nn.Conv2d(embed_dims*2, embed_dims, 3, 1, 1, bias=False),
+            #     nn.BatchNorm2d(embed_dims),
+            #     nn.ReLU(True),
+            #     nn.Conv2d(embed_dims, embed_dims, 3, 1, 1, bias=False),
+            #     nn.BatchNorm2d(embed_dims),
+            #     nn.ReLU(True)]
+            # last_lin = nn.Conv2d(embed_dims, self.z_size * 3, 1)
+            # nn.init.normal_(last_lin.weight.data, 0., 1e-2)
+            # nn.init.constant_(last_lin.bias.data, 0.)
+            # flow_net.append(last_lin)
+            # self.flow_net = nn.Sequential(*flow_net)
+            
+            # 训练结果很差
+            # self.flow_net_3d = nn.Sequential(
+            #     nn.Conv3d(in_channels=2*embed_dims, out_channels=embed_dims, kernel_size=3, stride=1, padding=1, bias=False),
+            #     nn.BatchNorm3d(embed_dims),
+            #     nn.ReLU(True),
+            #     nn.Conv3d(in_channels=embed_dims, out_channels=embed_dims, kernel_size=3, stride=1, padding=1, bias=False),
+            #     nn.BatchNorm3d(embed_dims),
+            #     nn.ReLU(True),
+            #     nn.Conv3d(in_channels=embed_dims, out_channels=3, kernel_size=1)
+            # )
+           
+        # if self.estimate_flow:
+        #     for param in self.flow_net_3d.parameters():
+        #         param.requires_grad = True
+        # else:
+        #     for param in self.flow_net_3d.parameters():
+        #         param.requires_grad = False
+        
     def forward_occ(
             self,
             representation,
@@ -263,6 +295,8 @@ class NeuSHead(BaseTaskHead):
         return {'sdf': sdf, 'rep': representation, 'xyz': _}
     
     def get_uniform_sdf(self, aabb, resolution, device, shift=False):
+        # aabb = [-25.6, 0.0, -2.0, 25.6, 51.2, 4.4]
+        # resolution = 0.4
         xs = torch.linspace(
             aabb[0], aabb[3], int((aabb[3] - aabb[0]) / resolution), device=device)
         ys = torch.linspace(
@@ -274,7 +308,7 @@ class NeuSHead(BaseTaskHead):
             xs[None, :, None].expand(H, W, D),
             ys[:, None, None].expand(H, W, D),
             zs[None, None, :].expand(H, W, D)
-        ], dim=-1).flatten(0, 2)
+        ], dim=-1).flatten(0, 2) # (H*W*D, 3(whd))
 
         if shift:
             random_shift = torch.rand_like(xyzs) * resolution
@@ -475,33 +509,45 @@ class NeuSHead(BaseTaskHead):
             representation, 
             metas=None, 
             **kwargs):
-        
+        """
+            Args:
+                representation: tpv plane features  
+                    tuple, (tpv_hw, tpv_zh, tpv_wz)
+                    * tpv_hw: (1, H*W, C)
+                    * tpv_zh: (1, Z*H, C)
+                    * tpv_wz: (1, W*Z, C)
+        """
         estimate_flow = self.estimate_flow and (kwargs.get('prev_rep', None) is not None or self.training)
         
         # self.model.field.pre_compute_density_color(representation)#, torch.float)
         if not self.using_2d_img_feats:
-            self.model.field.pre_compute_density_color(representation)
+            self.model.field.pre_compute_density_color(representation) # 计算SDF场
         else:
             self.model.field.pre_compute_density_color(
                 representation, img_feats=kwargs['ms_img_feats'], img_metas=metas)
 
         if estimate_flow:
             assert not isinstance(representation, list) # TODO
-            prev_rep = kwargs.get('prev_rep', None)
+            curr_rep = kwargs.get('curr_rep', None) # B, H, W, Z, C
+            prev_rep = kwargs.get('prev_rep', None) # 默认值为None
             next_rep = kwargs.get('next_rep', None)
-            assert prev_rep is not None and \
-                next_rep is not None
-            prev_rep = prev_rep.unflatten(1, self.bev_size).permute(0, 3, 1, 2)
-            next_rep = next_rep.unflatten(1, self.bev_size).permute(0, 3, 1, 2)
-            curr_rep = representation.unflatten(1, self.bev_size).permute(0, 3, 1, 2)
-            prev_curr = torch.cat([prev_rep, curr_rep], dim=1)
-            next_curr = torch.cat([next_rep, curr_rep], dim=1)
+            assert prev_rep is not None and next_rep is not None
+
+            prev_rep = prev_rep.permute(0, 4, 1, 2, 3)
+            next_rep = next_rep.permute(0, 4, 1, 2, 3) # B, C, H, W, Z
+            curr_rep = curr_rep.permute(0, 4, 1, 2, 3) # B, C, H, W, Z
+
             curr_prev = torch.cat([curr_rep, prev_rep], dim=1)
             curr_next = torch.cat([curr_rep, next_rep], dim=1)
-            curr2prev_flow = self.flow_net(prev_curr).unflatten(1, (3, self.z_size)).permute(0, 1, 3, 4, 2) # bs, 3, h, w, z
-            curr2next_flow = self.flow_net(next_curr).unflatten(1, (3, self.z_size)).permute(0, 1, 3, 4, 2)
-            prev2curr_flow = self.flow_net(curr_prev).unflatten(1, (3, self.z_size)).permute(0, 1, 3, 4, 2)
-            next2curr_flow = self.flow_net(curr_next).unflatten(1, (3, self.z_size)).permute(0, 1, 3, 4, 2)
+            curr2prev_flow = self.flow_net_3d(curr_prev) # bs, 3, h, w, z
+            curr2next_flow = self.flow_net_3d(curr_next)
+            
+            # motion_rep = torch.cat([curr_rep, prev_rep, next_rep], dim=1)
+            # independent_flow = self.flow_net_3d(motion_rep)
+            # curr2next_flow = independent_flow.clone()
+            # curr2prev_flow = -independent_flow.clone()
+            
+   
 
         global_iter = kwargs.get('global_iter', None)
         amp = 'amp' in os.environ and os.environ['amp'] == 'true'
@@ -510,9 +556,9 @@ class NeuSHead(BaseTaskHead):
                 ray_sampler = self.ray_sampler_eval
             else:
                 ray_sampler = self.ray_sampler 
-            rays = ray_sampler()
+            rays = ray_sampler() # 图像上采样的点 (HW, 2(wh/xy))
 
-            origin, direction = self.img2lidar(metas, rays) # B, N, 3; B, N, R, 3
+            origin, direction = self.img2lidar(metas, rays) # B, N, 3; B, N, R(55(H)x190(W)), 3(whd)
             bs, num_cams, num_rays = direction.shape[:3]
             assert bs == 1, 'only support bs = 1 currently'
             origin = origin.unsqueeze(2).repeat(1, 1, num_rays, 1).flatten(0, 2)
@@ -521,14 +567,14 @@ class NeuSHead(BaseTaskHead):
             direction = direction / direction_norm
             # camera_indices = torch.arange(bs * num_cams, device=origin.device).unsqueeze(-1).repeat(1, num_rays).reshape(-1, 1)
 
-            ray_bundle = RayBundle(
+            ray_bundle = RayBundle( # RayBundle是nerfstudio定义的数据格式
                 origins=origin,#.float(),
                 directions=direction,#.float(),
                 directions_norm=direction_norm,#.float(),
                 # camera_indices=camera_indices,
                 pixel_area=torch.zeros_like(direction_norm))#, dtype=torch.float)
 
-            output = self.model(ray_bundle, iter=global_iter)
+            output = self.model(ray_bundle, iter=global_iter) # 渲染
             uniform_sdf = None
             if self.return_uniform_sdf or estimate_flow:
                 uniform_data = self.get_uniform_sdf(self.aabb, self.resolution, rays.device, True)
@@ -606,24 +652,22 @@ class NeuSHead(BaseTaskHead):
         #     print(cam, ray)
         #     import pdb; pdb.set_trace()
 
-        if estimate_flow:
-            positions = ray_samples.frustums.get_positions() # B * N * R, S, 3
-            positions = positions.reshape(bs, num_cams, num_rays, num_samples_per_ray, 3)
-            grids = self.model.field.mapping.meter2grid(positions, True)
-            # grids[..., :2] = grids[..., :2] / (self.bev_size - 1)
-            # grids[..., 2:] = grids[..., 2:] / (self.z_size - 1)
-            prev_sampled_flow = nn.functional.grid_sample(
-                curr2prev_flow, 
-                grids[..., [2, 1, 0]] * 2 - 1,
-                mode='bilinear',
-                align_corners=True).permute(0, 2, 3, 4, 1) # bs, N, R, S, 3
-            next_sampled_flow = nn.functional.grid_sample(
-                curr2next_flow,
-                grids[..., [2, 1, 0]] * 2 - 1,
-                mode='bilinear',
-                align_corners=True).permute(0, 2, 3, 4, 1)
-            prev_warp = positions + prev_sampled_flow # B, N, R, S, 3
-            next_warp = positions + next_sampled_flow
+        # if estimate_flow: # in lidar_coords?
+        #     positions = ray_samples.frustums.get_positions() # B * N * R, S, 3(whd/xyz) pos = self.origins + self.directions * (self.starts + self.ends) / 2
+        #     positions = positions.reshape(bs, num_cams, num_rays, num_samples_per_ray, 3)
+        #     grids = self.model.field.mapping.meter2grid(positions, True) # 1, 1, render_h*render_w, points_per_ray, 3 (hwd)
+        #     prev_sampled_flow = nn.functional.grid_sample( # 射线采样tpv_feature的flow?
+        #         curr2prev_flow, 
+        #         grids[..., [2, 1, 0]] * 2 - 1,
+        #         mode='bilinear',
+        #         align_corners=True).permute(0, 2, 3, 4, 1) # bs, N, R, S, 3
+        #     next_sampled_flow = nn.functional.grid_sample(
+        #         curr2next_flow,
+        #         grids[..., [2, 1, 0]] * 2 - 1,
+        #         mode='bilinear',
+        #         align_corners=True).permute(0, 2, 3, 4, 1)
+        #     prev_warp = positions + prev_sampled_flow # B, N, R, S, 3
+        #     next_warp = positions + next_sampled_flow
             
         if global_iter is not None and \
             global_iter % self.print_freq == 0 and \
@@ -638,9 +682,9 @@ class NeuSHead(BaseTaskHead):
         ray_idx_for_cams = [
             torch.arange(num_rays, device=rgb.device).unsqueeze(-1).repeat(1, num_samples_per_ray).flatten()] * num_cams
         eik_grad = output['eik_grad']
-        if estimate_flow:
-            prev_warp_for_cams = chunk_cams(prev_warp, num_cams)
-            next_warp_for_cams = chunk_cams(next_warp, num_cams)
+        # if estimate_flow:
+        #     prev_warp_for_cams = chunk_cams(prev_warp, num_cams)
+        #     next_warp_for_cams = chunk_cams(next_warp, num_cams)
         if self.return_sample_sdf:
             sample_sdf_for_cams = chunk_cams(sample_sdf, num_cams)
 
@@ -654,9 +698,9 @@ class NeuSHead(BaseTaskHead):
             weights_for_cams = weights_for_cams[:(num_cams // 2)]
             ts_for_cams = ts_for_cams[:(num_cams // 2)]
             deltas_for_cams = deltas_for_cams[:(num_cams // 2)]
-            if estimate_flow:
-                prev_warp_for_cams = prev_warp_for_cams[:(num_cams // 2)]
-                next_warp_for_cams = next_warp_for_cams[:(num_cams // 2)]
+            # if estimate_flow:
+            #     prev_warp_for_cams = prev_warp_for_cams[:(num_cams // 2)]
+            #     next_warp_for_cams = next_warp_for_cams[:(num_cams // 2)]
             if self.return_max_depth:
                 max_depth = max_depth[:, :(num_cams//2), :]
             if self.return_sample_sdf:
@@ -665,7 +709,7 @@ class NeuSHead(BaseTaskHead):
                 sem = sem[:, (num_cams//2):, ...]
         
         outputs = {
-            'ms_depths': [depth],
+            'ms_depths': [depth], # ms -- multi-scale
             # 'ms_depths_median': [depth_median],
             'ms_colors': [rgb],
             'ms_accs': [acc],
@@ -682,15 +726,15 @@ class NeuSHead(BaseTaskHead):
             'uniform_sdf': uniform_sdf}
         if estimate_flow:
             outputs.update({
-                'prev_warp': prev_warp_for_cams,
-                'next_warp': next_warp_for_cams,
+                # 'prev_warp_cams': prev_warp_for_cams,
+                # 'next_warp_cams': next_warp_for_cams,
                 'curr2prev_flow': curr2prev_flow,
                 'curr2next_flow': curr2next_flow,
-                'prev2curr_flow': prev2curr_flow,
-                'next2curr_flow': next2curr_flow,
+                # 'prev2curr_flow': prev2curr_flow,
+                # 'next2curr_flow': next2curr_flow,
                 'uniform_xyz': uniform_xyz,
-                'uniform_sdf_prev': kwargs['sdf_prev'],
-                'uniform_sdf_next': kwargs['sdf_next']
+                # 'uniform_sdf_prev': kwargs['sdf_prev'],
+                # 'uniform_sdf_next': kwargs['sdf_next']
             })
         if self.return_max_depth:
             outputs.update({

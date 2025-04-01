@@ -13,7 +13,20 @@ class LinearMapping:
             w_half=False,
             d_size=[20, 10],
             d_range=[-4.0, 4.0, 12.0]):
-        
+        """_summary_
+        kitti_set:
+        mapping_args = dict(
+            nonlinear_mode='linear',
+            h_size=[256, 0],
+            h_range=[51.2, 0],
+            h_half=True,
+            w_size=[128, 0],
+            w_range=[25.6, 0],
+            w_half=False,
+            d_size=[32, 0],
+            d_range=[-2.0, 4.4, 4.4]
+)
+        """
         self.h_size = h_size
         self.h_range = h_range
         self.h_half = h_half
@@ -35,7 +48,7 @@ class LinearMapping:
         else:
             self.w_tot_len = 1 + 2 * (self.w_size[0] + self.w_size[1])
         self.d_tot_len = 1 + self.d_size[0] + self.d_size[1]
-
+        
     def grid2meter(self, grid):
         # grid: [..., (h, w, d)]
         h, w = grid[..., 0], grid[..., 1]

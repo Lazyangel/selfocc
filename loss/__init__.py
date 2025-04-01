@@ -9,3 +9,5 @@ from .edge_loss_3d_ms import EdgeLoss3DMS
 from .eikonal_loss import EikonalLoss
 from .sparsity_loss import SparsityLoss, HardSparsityLoss, SoftSparsityLoss, AdaptiveSparsityLoss
 from .second_grad_loss import SecondGradLoss
+from .flow_loss_mono_multi import FlowLossMonoMulti
+from .flow_loss import FlowLoss

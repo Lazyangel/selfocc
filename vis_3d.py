@@ -17,6 +17,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import matplotlib; matplotlib.use('agg')
+import cv2
 
 import mmcv
 from mmengine import Config
@@ -339,8 +340,7 @@ def draw(
     else:
         mlab.show()
     mlab.close()
-
-
+    
 def main(local_rank, args):
     if args.dataset == 'nuscenes':
         from nuscenes import NuScenes

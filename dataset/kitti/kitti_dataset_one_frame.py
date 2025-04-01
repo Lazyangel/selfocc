@@ -1,4 +1,4 @@
-import glob, os, time, random
+import glob, os, time, random, cv2
 
 import numpy as np
 import torch
@@ -38,6 +38,9 @@ class Kitti_One_Frame:
             choose_nearest=False,
             return_sem=False,
             sem_path=None,
+            sequential=False, # 是否时序融合
+            return_flow=False,
+            return_motMask=False,
             **kwargs,
     ):
         self.root = root
@@ -55,16 +58,20 @@ class Kitti_One_Frame:
         self.return_sem = return_sem
         assert (not return_sem) or os.path.exists(sem_path)
         self.sem_path = sem_path
+        self.sequential = sequential
+        self.return_flow = return_flow
+        self.return_motMask = return_motMask
         
         self.transxy = [
             [0, -1., 0, 0],
             [1., 0, 0, 0],
             [0, 0, 1., 0],
             [0, 0, 0, 1.]]
-        self.transxy = np.array(self.transxy)
+        self.transxy = np.array(self.transxy) # 沿z轴顺时针旋转90度
 
         splits = {
-            "train": ["00", "01", "02", "03", "04", "05", "06", "07", "09", "10"],                   
+            # "train": ["00", "01", "02", "03", "04", "05", "06", "07", "09", "10"],
+            "train": ["00", "01"],
             "val": ["08"],
             "test": ["11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21"],
         }
@@ -73,7 +80,7 @@ class Kitti_One_Frame:
             self.sequences = sequences
         else:
             self.sequences = splits[split]
-        self.output_scale = 1
+        self.output_scale = 1 
         self.scene_size = (51.2, 51.2, 6.4)
         self.vox_origin = np.array([0, -25.6, -2])
         self.frames_interval = frames_interval
@@ -146,7 +153,14 @@ class Kitti_One_Frame:
                     self.root, "dataset", "sequences", sequence, "image_2", frame_id + ".png")
                 current_lid_path = os.path.join(
                     self.root, "dataset", "sequences", sequence, "velodyne", frame_id + ".bin")
-
+                c2p_flow_path = os.path.join(
+                    self.root, "dataset", "sequences", sequence, "flow_c2p", frame_id + ".png")
+                c2n_flow_path = os.path.join(
+                    self.root, "dataset", "sequences", sequence, "flow_c2n", frame_id + ".png")
+                mot_mask_path = os.path.join(
+                    self.root, "dataset", "sequences", sequence, "move_object_mask", frame_id + "_mask.npy"
+                )
+                
                 prev_frame_ids, next_frame_ids = [], []
                 prev_img_paths, next_img_paths = [], []
                 prev_lid_paths, next_lid_paths = [], []
@@ -256,6 +270,9 @@ class Kitti_One_Frame:
                             "sequence": sequence,
                             "img_path": current_img_path,
                             "lid_path": current_lid_path,
+                            "c2p_flow_path": c2p_flow_path,
+                            "c2n_flow_path": c2n_flow_path,
+                            "mot_mask_path": mot_mask_path,
                             "pose": gt_global_poses[int(frame_id)],
 
                             "prev_img_paths": prev_img_paths,
@@ -322,6 +339,14 @@ class Kitti_One_Frame:
         sem = np.load(sem_path)[None, ...]
         return sem
     
+    def readFlowKITTI(self, filename):
+        flow = cv2.imread(filename, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
+        flow = flow[:self.img_H, :self.img_W, :]
+        flow = flow[:, :, ::-1].astype(np.float32)
+        flow, valid = flow[:, :, :2], flow[:, :, 2]
+        flow = (flow - 2 ** 15) / 64.0
+        return flow, valid
+
     def __len__(self):
         return len(self.scans)
     
@@ -336,7 +361,7 @@ class Kitti_One_Frame:
 
         intrinsic = np.eye(4)
         intrinsic[:3, :3] = scan['P'][:3, :3]
-        lidar2img = intrinsic @ scan['T_velo_2_cam'] @ np.linalg.inv(self.transxy)
+        lidar2img = intrinsic @ scan['T_velo_2_cam'] @ np.linalg.inv(self.transxy) # nuscenes coords --> kitti coords --> cam2_2_img @ velo2cam2
         img2lidar = np.linalg.inv(lidar2img)
 
         temImg2lidar = self.transxy @ np.linalg.inv(scan['T_velo_2_cam']) @ \
@@ -344,7 +369,9 @@ class Kitti_One_Frame:
             np.linalg.inv(scan['pose']) @ \
             anchor_scan['pose'] @ \
             anchor_scan['T_cam2_2_cam0'] @ \
-            np.linalg.inv(intrinsic)
+            np.linalg.inv(intrinsic)          
+        
+        lidar2temImg = np.linalg.inv(temImg2lidar)
         
         img2prevImg = intrinsic @ \
             anchor_scan['T_cam0_2_cam2'] @ \
@@ -360,6 +387,31 @@ class Kitti_One_Frame:
             anchor_scan['T_cam2_2_cam0'] @ \
             np.linalg.inv(intrinsic)
         
+        lidar2prevLidar = img2lidar @ img2prevImg @ lidar2img # img2lidar @ img2prevImg @ lidar2img
+        lidar2nextLidar = img2lidar @ img2nextImg @ lidar2img
+        '''
+        lidar2prevLidar = self.transxy @ \
+            np.linalg.inv(scan['T_velo_2_cam']) @ \
+            anchor_scan['T_cam0_2_cam2'] @ \
+            np.linalg.inv(anchor_scan['prev_poses'][anchor_prev]) @ \
+            anchor_scan['pose'] @ \
+            anchor_scan['T_cam2_2_cam0'] @ \
+            scan['T_velo_2_cam'] @ \
+            np.linalg.inv(self.transxy)
+        '''
+        # lidar2prevLidar2 = self.transxy @ \
+        #     np.linalg.inv(anchor_scan['T_velo_2_cam']) @ \
+        #     anchor_scan['T_cam0_2_cam2'] @ \
+        #     np.linalg.inv(anchor_scan['prev_poses'][anchor_prev]) @ \
+        #     anchor_scan['pose'] @ \
+        #     anchor_scan['T_cam2_2_cam0'] @ \
+        #     anchor_scan['T_velo_2_cam'] @ \
+        #     np.linalg.inv(self.transxy) 
+        
+        lidar2prevImg = img2prevImg @ lidar2img
+        lidar2nextImg = img2nextImg @ lidar2img
+        
+
         img_metas.update({
             'lidar2img': np.expand_dims(lidar2img, axis=0),
             'img2lidar': [img2lidar],
@@ -367,7 +419,16 @@ class Kitti_One_Frame:
             'img2nextImg': [img2nextImg],
             'token': scan['frame_id'],
             'sequence': scan['sequence'],
-            'temImg2lidar': [temImg2lidar]
+            'temImg2lidar': [temImg2lidar],
+            'lidar2temImg': [lidar2temImg],
+            'lidar2prevLidar': [lidar2prevLidar],
+            'lidar2nextLidar': [lidar2nextLidar],
+            'lidar2prevImg': [lidar2prevImg],
+            'lidar2nextImg': [lidar2nextImg],
+            'T_cam2_2_velo_transxy':[self.transxy @ np.linalg.inv(scan['T_velo_2_cam'])],
+            'T_cam2_2_velo':[np.linalg.inv(scan['T_velo_2_cam'])],
+            'K': [intrinsic],
+            'inv_K': [np.linalg.inv(intrinsic)],
         })
 
         return img_metas
@@ -384,14 +445,16 @@ class Kitti_One_Frame:
         return imgs
 
     def __getitem__(self, index):
-        #### 1. get color, temporal_depth choice if necessary
+        ### 1. get color, temporal_depth choice if necessary
         if random.random() < self.cur_prob:
             temporal_supervision = 'curr'
         elif random.random() < self.prev_prob:
             temporal_supervision = 'prev'
         else:
             temporal_supervision = 'next'
-
+            
+        # temporal_supervision = 'curr'
+        
         #### 2. get self, prev, next infos for the stem, and also temp_depth info
         while True:
             scan = deepcopy(self.scans[index])
@@ -415,7 +478,8 @@ class Kitti_One_Frame:
                     continue
                 anchor_scan_id = np.random.choice(scan['next_frame_ids'])
                 anchor_scan = deepcopy(self.scans[self.frame2scan[str(sequence) + '_' + anchor_scan_id]])
-                            
+
+            # 如果没有 前后帧，就随机再取一个样本
             if len(anchor_scan['prev_frame_ids']) == 0 or len(anchor_scan['next_frame_ids']) == 0:
                 index = np.random.randint(len(self))
                 continue
@@ -436,13 +500,28 @@ class Kitti_One_Frame:
         if self.return_sem:
             sem = self.load_2d_sem_label(anchor_scan)
             img_metas.update({'sem': sem})
-
+        if self.return_flow:
+            c2p_flow_gt, c2p_valid = self.readFlowKITTI(anchor_scan['c2p_flow_path'])
+            c2n_flow_gt, c2n_valid = self.readFlowKITTI(anchor_scan['c2n_flow_path'])
+            img_metas.update({'c2p_flow_gt': c2p_flow_gt,
+                              'c2n_flow_gt': c2n_flow_gt,
+                              'P': scan['P'],})
+        if self.return_motMask:
+            mot_mask = np.load(anchor_scan['mot_mask_path'])[:self.img_H, :self.img_W]
+            img_metas.update({
+                'mot_mask': mot_mask
+            })
+            
         # read 6 cams
         input_imgs = self.read_surround_imgs(img_metas['input_imgs_path'])
         curr_imgs = self.read_surround_imgs(img_metas['curr_imgs_path'])
         prev_imgs = self.read_surround_imgs(img_metas['prev_imgs_path'])
         next_imgs = self.read_surround_imgs(img_metas['next_imgs_path'])
 
+        if self.sequential:
+            input_imgs.extend(prev_imgs) 
+            input_imgs.extend(next_imgs)
+            
         data_tuple = ([input_imgs, curr_imgs, prev_imgs, next_imgs], img_metas)
         return data_tuple   
 

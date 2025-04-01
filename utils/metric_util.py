@@ -189,9 +189,17 @@ class IoU(nn.Module):
         self.total_positive = torch.zeros(self.num_classes).cuda()
 
     def _after_step(self, outputs, targets, occ3d=False):
+        """_summary_
+
+        Args:
+            outputs (tensor[256 ,256 ,32]): pred_occ
+            targets (tensor[N, 3]): gt_occ
+            occ3d (bool, optional): _description_. Defaults to False.
+        """
         if occ3d:
             self._after_step_occ3d(outputs, targets)
             return
+        
         seen = targets.shape[0]
         correct = outputs[targets.transpose(0, 1).tolist()].sum()
         positive = outputs.sum()

@@ -48,7 +48,7 @@ class Kitti_Novel_View_Eval:
             [1., 0, 0, 0],
             [0, 0, 1., 0],
             [0, 0, 0, 1.]]
-        self.transxy = np.array(self.transxy)
+        self.transxy = np.array(self.transxy) # 绕z轴逆时针旋转90度
 
         splits = {
             "train": ["00", "01", "02", "03", "04", "05", "06", "07", "09", "10"],                   

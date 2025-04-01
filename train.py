@@ -32,7 +32,7 @@ def main(local_rank, args):
     if args.gpus > 1:
         distributed = True
         ip = os.environ.get("MASTER_ADDR", "127.0.0.1")
-        port = os.environ.get("MASTER_PORT", "20506")
+        port = os.environ.get("MASTER_PORT", "20706")
         hosts = int(os.environ.get("WORLD_SIZE", 1))  # number of nodes
         rank = int(os.environ.get("RANK", 0))  # node id
         gpus = torch.cuda.device_count()  # gpus per node
@@ -150,17 +150,30 @@ def main(local_rank, args):
     logger.info('work dir: ' + args.work_dir)
 
     if cfg.resume_from and osp.exists(cfg.resume_from):
-        map_location = 'cpu'
-        ckpt = torch.load(cfg.resume_from, map_location=map_location)
-        print(raw_model.load_state_dict(ckpt['state_dict'], strict=False))
-        optimizer.load_state_dict(ckpt['optimizer'])
-        scheduler.load_state_dict(ckpt['scheduler'])
-        epoch = ckpt['epoch']
-        global_iter = ckpt['global_iter']
-        last_iter = ckpt['last_iter'] if 'last_iter' in ckpt else 0
-        if hasattr(train_dataset_loader.sampler, 'set_last_iter'):
-            train_dataset_loader.sampler.set_last_iter(last_iter)
-        print(f'successfully resumed from epoch {epoch}')
+        # two stage opt use new optimizer and scheduler
+        if cfg.two_stage_opt:
+            map_location = 'cpu'
+            ckpt = torch.load(cfg.resume_from, map_location=map_location)
+            print(raw_model.load_state_dict(ckpt['state_dict'], strict=False))
+            epoch = 0
+            # set global_iter = 0 to init opt and scheduler
+            global_iter = 0
+            last_iter = ckpt['last_iter'] if 'last_iter' in ckpt else 0
+            if hasattr(train_dataset_loader.sampler, 'set_last_iter'):
+                train_dataset_loader.sampler.set_last_iter(last_iter)
+            print(f'successfully resumed from epoch {epoch}')
+        else:
+            map_location = 'cpu'
+            ckpt = torch.load(cfg.resume_from, map_location=map_location)
+            print(raw_model.load_state_dict(ckpt['state_dict'], strict=False))
+            optimizer.load_state_dict(ckpt['optimizer'])
+            scheduler.load_state_dict(ckpt['scheduler'])
+            epoch = ckpt['epoch']
+            global_iter = ckpt['global_iter']
+            last_iter = ckpt['last_iter'] if 'last_iter' in ckpt else 0
+            if hasattr(train_dataset_loader.sampler, 'set_last_iter'):
+                train_dataset_loader.sampler.set_last_iter(last_iter)
+            print(f'successfully resumed from epoch {epoch}')
     elif cfg.load_from:
         ckpt = torch.load(cfg.load_from, map_location='cpu')
         if 'state_dict' in ckpt:
@@ -330,21 +343,21 @@ def main(local_rank, args):
 
                     result_dict = my_model(imgs=input_imgs, metas=img_metas)
 
-                    loss_input = {
-                        'curr_imgs': curr_imgs,
-                        'prev_imgs': prev_imgs,
-                        'next_imgs': next_imgs,
-                        'curr_feats': curr_feats,
-                        'prev_feats': prev_feats,
-                        'next_feats': next_feats,
-                        'metas': img_metas,
-                        'color_imgs': color_imgs,
-                    }
-                    for loss_input_key, loss_input_val in cfg.loss_input_convertion.items():
-                        loss_input.update({
-                            loss_input_key: result_dict[loss_input_val]
-                        })
-                    loss, loss_dict = loss_func(loss_input)
+                    # loss_input = {
+                    #     'curr_imgs': curr_imgs,
+                    #     'prev_imgs': prev_imgs,
+                    #     'next_imgs': next_imgs,
+                    #     'curr_feats': curr_feats,
+                    #     'prev_feats': prev_feats,
+                    #     'next_feats': next_feats,
+                    #     'metas': img_metas,
+                    #     'color_imgs': color_imgs,
+                    # }
+                    # for loss_input_key, loss_input_val in cfg.loss_input_convertion.items():
+                    #     loss_input.update({
+                    #         loss_input_key: result_dict[loss_input_val]
+                    #     })
+                    # loss, loss_dict = loss_func(loss_input)
 
                 if args.depth_metric:
                     ms_depths = result_dict['ms_depths'][0]
@@ -357,20 +370,20 @@ def main(local_rank, args):
                     depth_pred = ms_depths[0]
                     depth_metric._after_step(depth_loc, depth_gt, depth_mask, depth_pred)
                 
-                val_loss_list.append(loss.detach().cpu().numpy())
-                if i_iter_val % print_freq == 0 and local_rank == 0:
-                    logger.info('[EVAL] Epoch %d Iter %5d: Loss: %.3f (%.3f)'%(
-                        epoch, i_iter_val, loss.item(), np.mean(val_loss_list)))
-                    detailed_loss = []
-                    for loss_name, loss_value in loss_dict.items():
-                        detailed_loss.append(f'{loss_name}: {loss_value:.5f}')
-                    detailed_loss = ', '.join(detailed_loss)
-                    logger.info(detailed_loss)
+                # val_loss_list.append(loss.detach().cpu().numpy())
+                # if i_iter_val % print_freq == 0 and local_rank == 0:
+                #     logger.info('[EVAL] Epoch %d Iter %5d: Loss: %.3f (%.3f)'%(
+                #         epoch, i_iter_val, loss.item(), np.mean(val_loss_list)))
+                #     detailed_loss = []
+                #     for loss_name, loss_value in loss_dict.items():
+                #         detailed_loss.append(f'{loss_name}: {loss_value:.5f}')
+                #     detailed_loss = ', '.join(detailed_loss)
+                #     logger.info(detailed_loss)
         if args.depth_metric:
             depth_metric._after_epoch()
             depth_metric._reset()
-        logger.info('Current val loss is %.3f' %
-                (np.mean(val_loss_list)))
+        # logger.info('Current val loss is %.3f' %
+        #         (np.mean(val_loss_list)))
     
     if writer is not None:
         writer.close()

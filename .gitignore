@@ -164,3 +164,8 @@ ckpts
 data
 .DS_Store
 out
+
+# jupyter
+*.ipynb
+
+*.png

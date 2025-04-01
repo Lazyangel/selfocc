@@ -56,7 +56,7 @@ def main(local_rank, args):
     if args.gpus > 1:
         distributed = True
         ip = os.environ.get("MASTER_ADDR", "127.0.0.1")
-        port = os.environ.get("MASTER_PORT", "20506")
+        port = os.environ.get("MASTER_PORT", "20606")
         hosts = int(os.environ.get("WORLD_SIZE", 1))  # number of nodes
         rank = int(os.environ.get("RANK", 0))  # node id
         gpus = torch.cuda.device_count()  # gpus per node
@@ -156,7 +156,11 @@ def main(local_rank, args):
             input_imgs = input_imgs.cuda()
             
             with torch.cuda.amp.autocast(amp):
-
+                
+                
+                vis_dic = {}
+                
+                
                 result_dict = my_model(
                     imgs=input_imgs, 
                     metas=img_metas,
@@ -165,16 +169,18 @@ def main(local_rank, args):
                     occ_only=True)
                 
                 pred_occ = (result_dict['sdf'] <= args.thresh).to(torch.int)
-                
+                vis_dic['pred_voxel_raw'] = pred_occ.detach().cpu().numpy()
                 # gt_occ_raw for scenerf style iou calculation
                 # gt_occ for my own evaluation
                 gt_occ_raw = torch.from_numpy(read_semantic_kitti(img_metas[0])).cuda()
-                gt_occ_raw = torch.flip(gt_occ_raw, [1])
+                vis_dic['gt_voxel_raw_no_flip'] = gt_occ_raw.detach().cpu().numpy()
+                gt_occ_raw = torch.flip(gt_occ_raw, [1]) # 沿y轴翻转？
                 gt_occ = gt_occ_raw.clone() # gt_occ = np.copy(gt_occ_raw)
                 gt_occ[gt_occ == 255] = 0
                 gt_occ = torch.nonzero(gt_occ)
-
-                ## post process
+                
+                
+                ## post process 
                 max_d = gt_occ[:, 2].max()
                 min_d = gt_occ[:, 2].min()
                 # pred_occ[..., (max_d + 1):] = 0
@@ -184,7 +190,26 @@ def main(local_rank, args):
                 pred_occ[-6:, ...] = 0
                 pred_occ[:, :6, :] = 0
                 pred_occ[:, -6:, :] = 0
-
+                
+                if args.save_occ and int(img_metas[0]['token']) % 100 == 0:
+                    pred_save_path = osp.join(args.work_dir, 'vis_occ', img_metas[0]['token'] + '.npy')
+                    os.makedirs(osp.dirname(pred_save_path), exist_ok=True)
+                    
+                    # occnerf
+                    # vis_dic['pose_spatial'] = img_metas[0]['T_cam2_2_velo']
+                    # vis_dic['probability'] = pred_occ.unsqueeze(0).unsqueeze(0).detach().cpu().numpy()
+                    
+                    # selfocc
+                    # vis_dic['curr_imgs'] = curr_imgs
+                    vis_dic['pred_voxel'] = pred_occ.detach().cpu().numpy()
+                    vis_dic['gt_voxel_raw'] = gt_occ_raw.detach().cpu().numpy()
+                    vis_dic['gt_voxel'] = gt_occ.detach().cpu().numpy()
+                    vis_dic['pose_spatial'] = img_metas[0]['T_cam2_2_velo']
+                    vis_dic['pose_spatial_transxy'] = img_metas[0]['T_cam2_2_velo_transxy']
+                    vis_dic['save_path'] = pred_save_path
+                    
+                    np.save(pred_save_path, vis_dic)
+                    
             iou_metric._after_step(pred_occ, gt_occ)
             gt_occ_scenerf = gt_occ_raw.clone()
             scenerf_metric.add_batch(pred_occ, gt_occ_scenerf)
@@ -230,6 +255,7 @@ if __name__ == '__main__':
     parser.add_argument('--resolution', type=float, default=0.2)
     parser.add_argument('--thresh', type=float, default=0)
     parser.add_argument('--sem', action='store_true', default=False)
+    parser.add_argument('--save-occ', action='store_true', default=False)
     args = parser.parse_args()
     
     ngpus = torch.cuda.device_count()

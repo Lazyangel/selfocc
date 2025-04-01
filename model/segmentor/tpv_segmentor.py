@@ -123,3 +123,59 @@ class TPVSegmentor(CustomBaseSegmentor):
             outs = self.head(**results)
         results.update(outs)
         return results
+    
+@SEGMENTORS.register_module()
+class TPVSegmentor4D(TPVSegmentor):
+    def __init__(
+        self,
+        align_after_view_transfromation=False,
+        num_adj=1,
+        with_prev=True,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.align_after_view_transfromation = align_after_view_transfromation
+        self.num_frame = num_adj + 1
+
+        self.with_prev = with_prev
+        
+        
+    def forward(self,
+                imgs=None,
+                metas=None,
+                points=None,
+                img_feat_only=False,
+                extra_backbone=False,
+                occ_only=False,
+                prepare=False,
+                **kwargs,
+        ):
+        """Forward training function.
+        """
+        if extra_backbone:
+            return self.forward_extra_img_backbone(imgs=imgs)
+                
+        results = {
+            'imgs': imgs,
+            'metas': metas,
+            'points': points,
+        }
+        results.update(kwargs) # kwargs 更新到 results
+        outs = self.extract_img_feat(**results)
+        # outs['ms_img_feats'] = [feat.float() for feat in outs['ms_img_feats']]
+        results.update(outs)
+        if img_feat_only:
+            return results['ms_img_feats_backbone']
+        # with torch.cuda.amp.autocast(enabled=False):
+        outs = self.lifter(**results)# TPV query lifter 
+        results.update(outs)
+        outs = self.encoder(**results) 
+        results.update(outs)
+        if occ_only and hasattr(self.head, "forward_occ"):
+            outs = self.head.forward_occ(**results)
+        elif prepare and hasattr(self.head, "prepare"):
+            outs = self.head.prepare(**results)
+        else:
+            outs = self.head(**results)
+        results.update(outs)
+        return results

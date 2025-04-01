@@ -171,7 +171,7 @@ class ReprojLossMonoMultiNewCombine(BaseLoss):
             diff_next[~next_mask] = 0.
             diff = diff_prev + diff_next
             cnt = prev_mask.to(torch.float) + next_mask.to(torch.float)
-            general_mask = cnt > 0
+            general_mask = cnt > 0 # 有效区域
             cnt = torch.clamp(cnt, 1.0)
             diff = diff / cnt # B, N, R
 

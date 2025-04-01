@@ -114,7 +114,20 @@ def get_reference_points(H, W, Z=8, num_points_in_pillar=4, dim='3d', bs=1, devi
 # This function must use fp32!!!
 @torch.cuda.amp.autocast(enabled=False)
 def point_sampling(reference_points, img_metas):
-    reference_points = reference_points.float()
+    
+    """
+    Converts 3D reference points to 2D image coordinates.
+
+    Parameters:
+    - reference_points: 3D reference points in lidar coordinates.
+    - img_metas: List of image metadata, containing calibration information.
+
+    Returns:
+    - reference_points_cam: 2D reference points in image coordinates.
+    - tpv_mask: Validity mask for the reference points.
+    """
+    
+    reference_points = reference_points.float() # (bs, height_dim_num, tpv_plane_num, 3(whz/xyz))
 
     lidar2img = []
     for img_meta in img_metas:
@@ -124,11 +137,12 @@ def point_sampling(reference_points, img_metas):
         lidar2img = reference_points.new_tensor(lidar2img)  # (B, N, 4, 4)
     else:
         lidar2img = torch.stack(lidar2img, dim=0)
-
+    
+    # Homogeneous coordinate transformation for reference_points
     reference_points = torch.cat(
         (reference_points, torch.ones_like(reference_points[..., :1])), -1)
 
-    reference_points = reference_points.permute(1, 0, 2, 3)
+    reference_points = reference_points.permute(1, 0, 2, 3) # torch.Size([1, 48, 8481, 4]) --> torch.Size([48, 1, 8481, 4])
     D, B, num_query = reference_points.size()[:3]
     num_cam = lidar2img.size(1)
 
@@ -140,7 +154,7 @@ def point_sampling(reference_points, img_metas):
 
     reference_points_cam = torch.matmul(
         lidar2img.to(torch.float32),
-        reference_points.to(torch.float32)).squeeze(-1)
+        reference_points.to(torch.float32)).squeeze(-1) # (D, B, num_cam, num_query, 4)
     
     eps = 1e-5
 
@@ -182,7 +196,7 @@ def point_sampling(reference_points, img_metas):
     # reference_points_cam[..., 0] /= img_metas[0]['img_shape'][0][1]
     # reference_points_cam[..., 1] /= img_metas[0]['img_shape'][0][0]
 
-    reference_points_cam[..., 0] /= img_metas[0]['img_shape'][1]
+    reference_points_cam[..., 0] /= img_metas[0]['img_shape'][1] # x--w, y--h
     reference_points_cam[..., 1] /= img_metas[0]['img_shape'][0] # D, B, N, Q, 2
 
     tpv_mask = (tpv_mask & (reference_points_cam[..., 1:2] > 0.0)

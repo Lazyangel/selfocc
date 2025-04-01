@@ -215,10 +215,10 @@ def main(local_rank, args):
                     lidar_points[:, 0] = (lidar_points[:, 0] - point_cloud_range[0]) / expansion[0]
                     lidar_points[:, 1] = (lidar_points[:, 1] - point_cloud_range[1]) / expansion[1]
                     lidar_points[:, 2] = (lidar_points[:, 2] - point_cloud_range[2]) / expansion[2]
-                    lidar_points = lidar_points.reshape(1, 200, 200, 16, 3)
+                    lidar_points = lidar_points.reshape(1, 200, 200, 16, 3) # W, H, Z, 3(whz)
                     sampled_sdf = F.grid_sample(
-                        result_dict['sdf'][None, None, ...], # 1, 1, H, W, D
-                        lidar_points[..., [2, 0, 1]] * 2 - 1,
+                        result_dict['sdf'][None, None, ...], # 1, 1, H, W, D 
+                        lidar_points[..., [2, 0, 1]] * 2 - 1, # W, H, Z, 3(zwh)
                         mode='bilinear',
                         align_corners=True) # 1, 1, 200, 200, 16
                     if args.density:

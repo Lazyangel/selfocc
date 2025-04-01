@@ -13,20 +13,60 @@
             "console": "integratedTerminal",
 
             "args": [
-                // nuscenes
+                // nuscenes occ train
                 // "--py-config", "config/nuscenes/nuscenes_occ.py",
                 // "--work-dir", "out/nuscenes/occ_train",
                 // "--depth-metric",
 
-                // semanticKitti
-                "--py-config", "config/kitti/kitti_occ.py",
+                // semanticKitti occ trian
+                "--py-config", "config/kitti/kitti_occ_flow_stage_two.py",
                 "--work-dir", "out/kitti/occ_train_debug",
                 "--depth-metric",
                 "--dataset", "kitti",
+
+                // semanticKitti occ visual 
+                // "--py-config", "config/kitti/kitti_occ.py",
+                // "--work-dir", "out/kitti/occ_train",
+                // "--resume-from", "out/kitti/occ_train/latest.pth",
+                // "--frame-idx", "0", "100", "200",
+                // "--dataset", "kitti",
+                // "--model-pred",
+                // "--save-rgb",
+
+                // novel depth visual
+                // "--py-config", "config/nuscenes/nuscenes_novel_depth.py",
+                // "--work-dir", "out/nuscenes/novel_depth",
+                // "--resume-from", "out/nuscenes/novel_depth/model_state_dict.pth",
+                // "--vis-nerf-rgb", "ms_colors",
+                // "--frame-idx", "0", "100", "200",
+                // "--num-rays", "96", "200",
+
+                // eval depth
+                // "--py-config", "config/kitti/kitti_occ.py",
+                // "--work-dir", "out/kitti/occ_depth",
+                // "--resume-from", "out/kitti/occ_train/latest.pth",
+                // "--dataset", "kitti",
+                // "--depth-metric",
+                // "--save-rgb",
+
+                // eval occ
+                // "--py-config", "config/kitti/kitti_occ.py",
+                // "--work-dir", "out/kitti/occ_train",
+                // "--resume-from", "out/kitti/occ_train/latest.pth",
+                // "--save-occ",
+
+                // eval flow
+                // "--py-config", "config/kitti/kitti_occ_4d.py",
+                // "--work-dir", "out/kitti/occ_train_debug",
+                // "--resume-from", "out/kitti/occ_train_flow_sup_mini_2/latest.pth",
+                // "--dataset", "kitti",
+                // // "--save-flow-rgb",
+                // "--flow-metric",
+                // "--return-loss",
             ],
             //指定
             "env":{
-                "CUDA_VISIBLE_DEVICES": "3"
+                "CUDA_VISIBLE_DEVICES": "1"
             }  
         }
         

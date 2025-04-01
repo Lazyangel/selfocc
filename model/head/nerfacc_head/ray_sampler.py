@@ -42,7 +42,7 @@ class RaySampler(nn.Module):
             ray_y = torch.arange(ray_number[0], dtype=torch.float)
             rays = torch.stack([
                 ray_x.unsqueeze(0).expand(ray_number[0], -1),
-                ray_y.unsqueeze(1).expand(-1, ray_number[1])], dim=-1) # H, W, 2
+                ray_y.unsqueeze(1).expand(-1, ray_number[1])], dim=-1) # H, W, 2(wh/xy)
             self.register_buffer('rays', rays, False)
 
     def forward(self):

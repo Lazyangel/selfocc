@@ -31,7 +31,7 @@ class TPVPositionalEncoding(BaseModule):
         
         hw_meter = hw_meter.clone()
         hw_meter[..., 0] = (hw_meter[..., 0] - pc_range[0]) / (pc_range[3] - pc_range[0])
-        hw_meter[..., 1] = (hw_meter[..., 1] - pc_range[1]) / (pc_range[4] - pc_range[1])
+        hw_meter[..., 1] = (hw_meter[..., 1] - pc_range[1]) / (pc_range[4] - pc_range[1]) # 归一化
         hw_freq_feat = get_feat_from_meter(num_freqs[0], hw_meter)
 
         zh_meter = zh_meter.clone()

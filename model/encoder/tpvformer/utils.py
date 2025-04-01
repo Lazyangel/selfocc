@@ -69,3 +69,21 @@ def get_cross_view_ref_points(tpv_h, tpv_w, tpv_z, num_points_in_pillar, offset=
     ], dim=0) # hw+zh+wz, 3, #p, 2
     
     return reference_points
+
+def grid2meter(grid, tpv_size=[256, 256, 32], pc_range=[-25.6, 0.0, -2.0, 25.6, 51.2, 4.4]):
+    """_summary_
+
+    Args:
+        grid (_type_): _description_ H, W, Z, 3
+        tpv_size (_type_): _description_  [256, 256, 32]
+        pc_range (_type_): _description_  [-25.6, 0.0, -2.0, 25.6, 51.2, 4.4]
+    """
+
+    assert grid.shape[-1] == 3
+    h, w, z = grid[..., 0], grid[..., 1], grid[..., 2] 
+    h = h * (pc_range[3] - pc_range[0]) / tpv_size[0] + pc_range[0]
+    w = w * (pc_range[4] - pc_range[1]) / tpv_size[1] + pc_range[1]
+    z = z * (pc_range[5] - pc_range[2]) / tpv_size[2] + pc_range[2]
+    return torch.stack([h, w, z], dim=-1)
+        
+    

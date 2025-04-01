@@ -44,14 +44,14 @@ def main(local_rank, args):
 
     # load config
     cfg = Config.fromfile(args.py_config)
-    cfg = modify_for_eval(cfg, args.dataset) # 这里修改了一些参数！
+    cfg = modify_for_eval(cfg, args.dataset)
     cfg.work_dir = args.work_dir
 
     # init DDP
     if args.gpus > 1:
         distributed = True
         ip = os.environ.get("MASTER_ADDR", "127.0.0.1")
-        port = os.environ.get("MASTER_PORT", "20606")
+        port = os.environ.get("MASTER_PORT", "20506")
         hosts = int(os.environ.get("WORLD_SIZE", 1))  # number of nodes
         rank = int(os.environ.get("RANK", 0))  # node id
         gpus = torch.cuda.device_count()  # gpus per node
@@ -84,28 +84,6 @@ def main(local_rank, args):
     from dataset import get_dataloader
 
     # build model    
-    cfg.model.head.return_max_depth = True
-    my_model = build_segmentor(cfg.model)
-    my_model.init_weights()
-    n_parameters = sum(p.numel() for p in my_model.parameters() if p.requires_grad)
-    logger.info(f'Number of params: {n_parameters}')
-    if distributed:
-        if cfg.get('syncBN', True):
-            my_model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(my_model)
-            logger.info('converted sync bn.')
-
-        find_unused_parameters = cfg.get('find_unused_parameters', False)
-        ddp_model_module = torch.nn.parallel.DistributedDataParallel
-        my_model = ddp_model_module(
-            my_model.cuda(),
-            device_ids=[torch.cuda.current_device()],
-            broadcast_buffers=False,
-            find_unused_parameters=find_unused_parameters)
-        raw_model = my_model.module
-    else:
-        my_model = my_model.cuda()
-        raw_model = my_model
-    logger.info('done ddp model')
 
     train_dataset_loader, val_dataset_loader = get_dataloader(
         cfg.train_dataset_config,
@@ -129,23 +107,9 @@ def main(local_rank, args):
     
     logger.info('resume from: ' + cfg.resume_from)
     logger.info('work dir: ' + args.work_dir)
-
-    if cfg.resume_from and osp.exists(cfg.resume_from):
-        map_location = 'cpu'
-        ckpt = torch.load(cfg.resume_from, map_location=map_location)
-        print(raw_model.load_state_dict(ckpt['state_dict'], strict=False))
-        logger.info(f'successfully resumed from epoch {ckpt["epoch"]}')
-    elif cfg.load_from:
-        ckpt = torch.load(cfg.load_from, map_location='cpu')
-        if 'state_dict' in ckpt:
-            state_dict = ckpt['state_dict']
-        else:
-            state_dict = ckpt
-        print(raw_model.load_state_dict(state_dict, strict=False))
         
     # eval
     print_freq = cfg.print_freq
-    my_model.eval()
     if args.depth_metric:
         from utils.metric_util import DepthMetric
         if args.dataset == 'kitti' or args.dataset == 'kitti_raw':
@@ -169,77 +133,61 @@ def main(local_rank, args):
         
     with torch.no_grad():
         for i_iter_val, (input_imgs, curr_imgs, prev_imgs, next_imgs, color_imgs, \
-                         img_metas, curr_aug, prev_aug, next_aug) in enumerate(val_dataset_loader):
+                         img_metas, curr_aug, prev_aug, next_aug) in enumerate(train_dataset_loader):
             
             input_imgs = input_imgs.cuda()
             
             with torch.cuda.amp.autocast(amp):
-                if cfg.get('estimate_pose'):
-                    assert curr_aug is not None and prev_aug is not None and next_aug is not None
-                    assert img_metas[0]['input_imgs_path'] == img_metas[0]['curr_imgs_path']
-                    curr_aug, prev_aug, next_aug = curr_aug.cuda(), prev_aug.cuda(), next_aug.cuda()
-                    pose_dict = my_model(pose_input=[curr_aug, prev_aug, next_aug], metas=img_metas, predict_pose=True)
-                    for i_meta, meta in enumerate(img_metas):
-                        meta.update(pose_dict[i_meta])
 
-                my_model(imgs=input_imgs, metas=img_metas, prepare=True)
-                # result_dict = my_model.module.head.render(metas=img_metas, batch=args.batch)
-                # result_dict = raw_model.head.render(metas=img_metas, batch=args.batch)
-                if distributed:
-                    result_dict = my_model.module.head.render(metas=img_metas, batch=args.batch)
-                else:
-                    result_dict = my_model.head.render(metas=img_metas, batch=args.batch)
+                c2p_flow_gt = img_metas[0]['c2p_flow_gt'] # H, W, 2
+                c2n_flow_gt = img_metas[0]['c2n_flow_gt']
+                P = img_metas[0]['P'] # 3, 4
                 
-                if args.flip:
-                    input_imgs = torch.flip(input_imgs, dims=[-1])
-                    for meta in img_metas:
-                        meta['flip'] = True
-                    my_model(imgs=input_imgs, metas=img_metas, prepare=True)
-                    # result_dict_flip = my_model.module.head.render(metas=img_metas, batch=args.batch)
-                    # result_dict_flip = raw_model.head.render(metas=img_metas, batch=args.batch)
-                    if distributed:
-                        result_dict_flip = my_model.module.head.render(metas=img_metas, batch=args.batch)
-                    else:
-                        result_dict_flip = my_model.head.render(metas=img_metas, batch=args.batch)
-                    
-                    ms_depths_flip = result_dict_flip['ms_depths'][0]
-                    result_dict['ms_depths'][0] = (result_dict['ms_depths'][0] + ms_depths_flip) / 2
+                # 生成采样点
+                ray_img_size = [350, 1200]
+                ray_number = [35, 120]
+                ray_x_dsr = ray_img_size[1] // ray_number[1]
+                ray_y_dsr = ray_img_size[0] // ray_number[0]
+                ray_x = torch.arange(ray_number[1], dtype=torch.int) * ray_x_dsr
+                ray_y = torch.arange(ray_number[0], dtype=torch.int) * ray_y_dsr
+                rays = torch.stack([
+                    ray_x.unsqueeze(0).expand(ray_number[0], -1),
+                    ray_y.unsqueeze(1).expand(-1, ray_number[1])], dim=-1).flatten(0, 1) # HW, 2
+                # 根据光流获取深度
+                H, W = c2n_flow_gt.shape[:2]
+                points1 = rays.numpy() # N, 2
 
-                    if 'ms_depths_median' in result_dict_flip:
-                        ms_depths_median_flip = result_dict_flip['ms_depths_median'][0]
-                        result_dict['ms_depths_median'][0] = (result_dict['ms_depths_median'][0] + ms_depths_median_flip) / 2
-                    
-                    ms_depths_max_flip = result_dict_flip['ms_max_depths'][0]
-                    result_dict['ms_max_depths'][0] = (result_dict['ms_max_depths'][0] + ms_depths_max_flip) / 2
+                # 计算这些特征点在第二帧图像中的对应位置
+                points2 = points1 + c2p_flow_gt[points1[:, 1], points1[:, 0]]
+
+                
+                points1_homo = cv2.convertPointsToHomogeneous(points1)[:, 0, :] # N, 3
+                points2_homo = cv2.convertPointsToHomogeneous(points2)[:, 0, :]
+
+                points4D = cv2.triangulatePoints(P, P, points1.T, points2.T) # 4, N 
+
+                # 将齐次坐标转换为非齐次坐标
+                points3D = points4D[:3] / points4D[3]
+
+                # 计算深度信息 (沿 Z 轴的距离)
+                depths = points3D[2]
+
+                print("Estimated Depths:", depths)
 
                 #### calculate all sorts of depths
-                ms_depths = result_dict['ms_depths'][0] # B, N, R(107008=176x608)
-                ms_depths = ms_depths.unflatten(-1, cfg.num_rays) # B, N, H(H/2), W(W/2)
+                # ms_depths = result_dict['ms_depths'][0] # B, N, R(107008=176x608)
+                # ms_depths = ms_depths.unflatten(-1, cfg.num_rays) # B, N, H(H/2), W(W/2)
 
-                if 'ms_depths_median' in result_dict:
-                    ms_depths_median = result_dict['ms_depths_median'][0]
-                    ms_depths_median = ms_depths_median.unflatten(-1, cfg.num_rays)
-                if 'ms_max_depths' in result_dict:
-                    ms_depths_max = result_dict['ms_max_depths'][0]
-                    ms_depths_max = ms_depths_max.unflatten(-1, cfg.num_rays)
+                # if 'ms_depths_median' in result_dict:
+                #     ms_depths_median = result_dict['ms_depths_median'][0]
+                #     ms_depths_median = ms_depths_median.unflatten(-1, cfg.num_rays)
+                # if 'ms_max_depths' in result_dict:
+                #     ms_depths_max = result_dict['ms_max_depths'][0]
+                #     ms_depths_max = ms_depths_max.unflatten(-1, cfg.num_rays)
 
-                if args.save_depth:
-                    # ms_depths: B, N, R
-                    for i, (ms_depth, img_meta) in enumerate(zip(ms_depths, img_metas)):
-                        token = img_meta['token']
-                        np.save(os.path.join(depth_save_path, token + '.npy'), ms_depth.cpu().numpy())
-
-                    if 'ms_depths_median' in result_dict:
-                        for i, (ms_depth, img_meta) in enumerate(zip(ms_depths_median, img_metas)):
-                            token = img_meta['token']
-                            np.save(os.path.join(depth_median_save_path, token + '.npy'), ms_depth.cpu().numpy())
-
-                    for i, (ms_depth, img_meta) in enumerate(zip(ms_depths_max, img_metas)):
-                        token = img_meta['token']
-                        np.save(os.path.join(depth_max_save_path, token + '.npy'), ms_depth.cpu().numpy())
+        
                 
                 if args.save_rgb and int(img_metas[0]['token']) % 100 == 0:
-                # if args.save_rgb:
                     for i, (color_imgs, ms_depth, img_meta) in enumerate(zip(color_imgs, ms_depths, img_metas)):
                         H, W = cfg.img_size
                         depth_H, depth_W  = ms_depth.shape[-2:]
@@ -292,7 +240,6 @@ if __name__ == '__main__':
     parser.add_argument('--depth-metric-tgt', type=str, default='raw')
     parser.add_argument('--dataset', type=str, default='nuscenes')
     parser.add_argument('--batch', type=int, default=0)
-    parser.add_argument('--flip', action='store_true', default=False)
     args = parser.parse_args()
     
     ngpus = torch.cuda.device_count()
