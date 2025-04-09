@@ -68,7 +68,7 @@ class TPVFormerEncoder(BaseEncoder):
         self.align_after_tpv_encode = align_after_tpv_encode
         self.temporal_fuse_mode = temporal_fuse_mode
         self.point_cloud_range=point_cloud_range
-        self.return_mode = 'combine' if self.with_prev else '3p'
+        self.return_mode = 'combine'
         
         if camera_aware:
             if camera_aware_mid_channels is None:

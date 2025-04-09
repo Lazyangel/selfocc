@@ -10,7 +10,8 @@ amp = False
 max_epochs = 24
 warmup_iters = 1000
 num_cams = 1
-
+render_type='3dgs'
+two_stage_opt = False
 
 optimizer = dict(
     optimizer=dict(
@@ -41,6 +42,9 @@ train_dataset_config = dict(
     strict = True,
     prev_prob = 0.2,
     choose_nearest = True,
+    render_type = render_type,
+    render_h = num_rays[0],
+    render_w = num_rays[1],
 )
     
 val_dataset_config = dict(
@@ -56,7 +60,10 @@ val_dataset_config = dict(
     strict = False,
     prev_prob = 0.2,
     choose_nearest = True,
-    return_depth = True
+    return_depth = True,
+    render_type = render_type,
+    render_h = num_rays[0],
+    render_w = num_rays[1],
 )
 
 train_wrapper_config = dict(
@@ -99,7 +106,7 @@ loss = dict(
     type='MultiLoss',
     loss_cfgs=[
         dict(
-            type='ReprojLossMonoMultiNew',
+            type='ReprojLoss',
             weight=1.0,
             no_ssim=False,
             img_size=img_size,
@@ -108,34 +115,31 @@ loss = dict(
                 'curr_imgs': 'curr_imgs',
                 'prev_imgs': 'prev_imgs',
                 'next_imgs': 'next_imgs',
-                'ray_indices': 'ray_indices',
-                'weights': 'weights',
-                'ts': 'ts',
                 'metas': 'metas',
-                'ms_rays': 'ms_rays',
+                'disp': 'disp',
                 # 'deltas': 'deltas'
                 }),
-        dict(
-            type='RGBLossMS',
-            weight=0.1,
-            img_size=img_size,
-            no_ssim=False,
-            ray_resize=num_rays,
-            input_dict={
-                'ms_colors': 'ms_colors',
-                'ms_rays': 'ms_rays',
-                'gt_imgs': 'color_imgs'}),
-        dict(
-            type='EikonalLoss',
-            weight=0.1,),
-        dict(
-            type='SecondGradLoss',
-            weight=0.1),
-        dict(
-            type='SoftSparsityLoss',
-            weight=0.005,
-            input_dict={
-                'density': 'uniform_sdf'})
+        # dict(
+        #     type='RGBLossMS',
+        #     weight=0.1,
+        #     img_size=img_size,
+        #     no_ssim=False,
+        #     ray_resize=num_rays,
+        #     input_dict={
+        #         'ms_colors': 'ms_colors',
+        #         'ms_rays': 'ms_rays',
+        #         'gt_imgs': 'color_imgs'}),
+        # dict(
+        #     type='EikonalLoss',
+        #     weight=0.1,),
+        # dict(
+        #     type='SecondGradLoss',
+        #     weight=0.1),
+        # dict(
+        #     type='SoftSparsityLoss',
+        #     weight=0.005,
+        #     input_dict={
+        #         'density': 'uniform_sdf'})
         # dict(
         #     type='SparsityLoss',
         #     weight=0.001,
@@ -145,16 +149,8 @@ loss = dict(
         ])
 
 loss_input_convertion = dict(
-    ms_depths='ms_depths',
-    ms_rays='ms_rays',
-    ms_accs='ms_accs',
-    ms_colors='ms_colors',
-    ray_indices='ray_indices',
-    weights='weights',
-    ts='ts',
-    eik_grad='eik_grad',
-    second_grad='second_grad',
-    uniform_sdf='uniform_sdf',
+    disp="disp",
+
     # deltas='deltas'
 )
 
@@ -165,13 +161,13 @@ _ffn_dim_ = 2 * _dim_
 num_heads = 6
 mapping_args = dict(
     nonlinear_mode='linear',
-    h_size=[256, 0],
+    h_size=[64, 0],
     h_range=[51.2, 0],
     h_half=True,
-    w_size=[128, 0],
+    w_size=[32, 0],
     w_range=[25.6, 0],
     w_half=False,
-    d_size=[32, 0],
+    d_size=[8, 0],
     d_range=[-2.0, 4.4, 4.4]
 )
 # bev_inner = 160
@@ -182,16 +178,13 @@ mapping_args = dict(
 # z_inner = 20
 # z_outer = 10
 # z_ranges = [-4.0, 4.0, 12.0]
-tpv_h = 1 + 256
-tpv_w = 1 + 2 * 128
-tpv_z = 1 + 32 + 0
-# tpv_h = 256
-# tpv_w = 2 * 128
-# tpv_z = 32 + 0
+tpv_h = 1 + 64
+tpv_w = 1 + 2 * 32
+tpv_z = 1 + 8 + 0
 point_cloud_range = [-25.6, 0.0, -2.0, 25.6, 51.2, 4.4]
 
-num_points_cross = [48, 48, 8]
-num_points_self = 12
+num_points_cross = [12, 12, 4]
+num_points_self = 3
 
 
 self_cross_layer = dict(
@@ -276,56 +269,16 @@ model = dict(
             self_cross_layer], 
         num_layers=4),
     head=dict(
-        type='NeuSHead',
-        roi_aabb=point_cloud_range, 
-        resolution=0.4,
-        near_plane=0.0,
-        far_plane=1e10,
-        num_samples=256,
-        num_samples_importance=0,
-        num_up_sample_steps=0,
-        base_variance=4,
-
-        beta_init=0.1,
-        beta_max=0.195,
-        total_iters=3516*11,
-        beta_hand_tune=False,
-        
-        use_numerical_gradients=False,
-        sample_gradient=True,
-        use_compact_2nd_grad=True,
-        return_uniform_sdf=True,
-        return_second_grad=True,
-
-        # rays args
-        ray_sample_mode='cellular',    # fixed, cellular
-        ray_number=num_rays,      # 192 * 400
-        ray_img_size=img_size,
-        ray_upper_crop=0,
-        # img2lidar args
-        trans_kw='temImg2lidar',
-        novel_view=None,
-
-        # render args
-        render_bkgd='random',
-
-        # bev nerf
-        # bev_inner=bev_inner,
-        # bev_outer=bev_outer,
-        # range_inner=range_inner,
-        # range_outer=range_outer,
-        # nonlinear_mode=nonlinear_mode,
-        # z_inner=z_inner,
-        # z_outer=z_outer,
-        # z_ranges=z_ranges,
-        mapping_args=mapping_args,
-
-        # mlp decoder 
-        embed_dims=_dim_,
-        color_dims=3,
-        density_layers=2,
-        sh_deg=0,
-        sh_act='relu',
-        two_split=False,
-        tpv=True,
-        use_fused_tpv=True,))
+        type='GSHead',
+        min_depth=0.1,
+        max_depth=80,
+        real_size=point_cloud_range,
+        voxels_size=[8, 64, 64],
+        stepsize=0.2,
+        input_channel=64,
+        position='embedding',
+        render_type=render_type,
+        gs_sample=0,
+        render_h=num_rays[0],
+        render_w=num_rays[1],
+        ))

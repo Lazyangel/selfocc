@@ -156,7 +156,7 @@ class BEVNeRF(BaseModule):
         if self.density_color.dtype == torch.float16:
             x = x.half()
 
-        grid = self.mapping.meter2grid(x, True)
+        grid = self.mapping.meter2grid(x, True) #H,W,D,3(xyz) --> H,W,D,3(yxz)
         grid = 2 * grid - 1
         grid = grid.reshape(1, -1, 1, 1, 3)
 

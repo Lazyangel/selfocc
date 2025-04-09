@@ -9,7 +9,7 @@
             "name": "Python 调试程序: 当前文件",
             "type": "debugpy",
             "request": "launch",
-            "program": "/home/zhaoyunya/disk/ajr/code/SelfOcc/train.py",
+            "program": "/home/zhaoyunya/disk/ajr/code/SelfOcc/eval_iou_kitti.py",
             "console": "integratedTerminal",
 
             "args": [
@@ -19,16 +19,16 @@
                 // "--depth-metric",
 
                 // semanticKitti occ trian
-                "--py-config", "config/kitti/kitti_occ_flow_stage_two.py",
-                "--work-dir", "out/kitti/occ_train_debug",
-                "--depth-metric",
-                "--dataset", "kitti",
+                // "--py-config", "config/kitti/kitti_occ_gs.py",
+                // "--work-dir", "out/kitti/occ_train_debug",
+                // "--depth-metric",
+                // "--dataset", "kitti",
 
                 // semanticKitti occ visual 
-                // "--py-config", "config/kitti/kitti_occ.py",
-                // "--work-dir", "out/kitti/occ_train",
-                // "--resume-from", "out/kitti/occ_train/latest.pth",
-                // "--frame-idx", "0", "100", "200",
+                // "--py-config", "config/kitti/kitti_occ_gs.py",
+                // "--work-dir", "out/kitti/gs/occ_train_gs_96x320",
+                // "--resume-from", "out/kitti/gs/occ_train_gs_96x320/latest.pth",
+                // // "--frame-idx", "0", "100", "200",
                 // "--dataset", "kitti",
                 // "--model-pred",
                 // "--save-rgb",
@@ -42,31 +42,34 @@
                 // "--num-rays", "96", "200",
 
                 // eval depth
-                // "--py-config", "config/kitti/kitti_occ.py",
-                // "--work-dir", "out/kitti/occ_depth",
-                // "--resume-from", "out/kitti/occ_train/latest.pth",
+                // "--py-config", "config/kitti/kitti_occ_gs.py",
+                // "--work-dir", "out/kitti/gs/occ_train_gs_55x190",
+                // "--resume-from", "out/kitti/gs/occ_train_gs_55x190/latest.pth",
                 // "--dataset", "kitti",
                 // "--depth-metric",
                 // "--save-rgb",
+                // "--render_type", "3dgs"
 
                 // eval occ
-                // "--py-config", "config/kitti/kitti_occ.py",
-                // "--work-dir", "out/kitti/occ_train",
-                // "--resume-from", "out/kitti/occ_train/latest.pth",
-                // "--save-occ",
-
+                "--py-config", "config/kitti/kitti_occ_gs.py",
+                "--work-dir", "out/kitti/gs/occ_train_gs_96x320",
+                "--resume-from", "out/kitti/occ_train_gs_96x320/latest.pth",
+                "--save-occ",
+                "--render_type", "3dgs"
+                
                 // eval flow
-                // "--py-config", "config/kitti/kitti_occ_4d.py",
+                // "--py-config", "config/kitti/kitti_occ_gs.py",
                 // "--work-dir", "out/kitti/occ_train_debug",
                 // "--resume-from", "out/kitti/occ_train_flow_sup_mini_2/latest.pth",
                 // "--dataset", "kitti",
+
                 // // "--save-flow-rgb",
                 // "--flow-metric",
                 // "--return-loss",
             ],
             //指定
             "env":{
-                "CUDA_VISIBLE_DEVICES": "1"
+                "CUDA_VISIBLE_DEVICES": "0"
             }  
         }
         

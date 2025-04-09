@@ -11,3 +11,6 @@ from .sparsity_loss import SparsityLoss, HardSparsityLoss, SoftSparsityLoss, Ada
 from .second_grad_loss import SecondGradLoss
 from .flow_loss_mono_multi import FlowLossMonoMulti
 from .flow_loss import FlowLoss
+from .reproj_loss import ReprojLoss
+from .entropy_last_loss import EntropyLastLoss
+from .loss_distortion import DistortionLoss

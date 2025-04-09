@@ -32,7 +32,7 @@ def main(local_rank, args):
     if args.gpus > 1:
         distributed = True
         ip = os.environ.get("MASTER_ADDR", "127.0.0.1")
-        port = os.environ.get("MASTER_PORT", "20706")
+        port = os.environ.get("MASTER_PORT", "20506")
         hosts = int(os.environ.get("WORLD_SIZE", 1))  # number of nodes
         rank = int(os.environ.get("RANK", 0))  # node id
         gpus = torch.cuda.device_count()  # gpus per node
@@ -279,6 +279,11 @@ def main(local_rank, args):
                     detailed_loss.append(f'{loss_name}: {loss_value:.5f}')
                 detailed_loss = ', '.join(detailed_loss)
                 logger.info(detailed_loss)
+                if 'disp' in result_dict:
+                    disp = result_dict['disp']
+                    min_depth = disp.min()
+                    max_depth = disp.max()
+                    logger.info('min_d=%.4f, max_d=%.4f'%(min_depth, max_depth))
                 loss_list = []
             data_time_s = time.time()
             time_s = time.time()
@@ -360,8 +365,11 @@ def main(local_rank, args):
                     # loss, loss_dict = loss_func(loss_input)
 
                 if args.depth_metric:
-                    ms_depths = result_dict['ms_depths'][0]
-                    ms_depths = ms_depths.unflatten(-1, cfg.num_rays)
+                    if 'disp' in result_dict:
+                        ms_depths = result_dict['disp'] # 1, 1, H, W
+                    else:
+                        ms_depths = result_dict['ms_depths'][0] # 1, 1, H*W
+                        ms_depths = ms_depths.unflatten(-1, cfg.num_rays)
 
                     depth_loc = ms_depths.new_tensor(img_metas[0]['depth_loc'])
                     depth_gt = ms_depths.new_tensor(img_metas[0]['depth_gt'])

@@ -41,6 +41,9 @@ class Kitti_One_Frame:
             sequential=False, # 是否时序融合
             return_flow=False,
             return_motMask=False,
+            render_type='vr', # vr for volume rendering; gs forgaussian splatting
+            render_h = 55,
+            render_w = 190,
             **kwargs,
     ):
         self.root = root
@@ -58,9 +61,14 @@ class Kitti_One_Frame:
         self.return_sem = return_sem
         assert (not return_sem) or os.path.exists(sem_path)
         self.sem_path = sem_path
+        # occ flow params
         self.sequential = sequential
         self.return_flow = return_flow
         self.return_motMask = return_motMask
+        # gs params
+        self.render_type = render_type
+        self.render_h = render_h
+        self.render_w = render_w
         
         self.transxy = [
             [0, -1., 0, 0],
@@ -105,7 +113,7 @@ class Kitti_One_Frame:
             calib = read_calib(
                 os.path.join(self.root, "dataset", "sequences", sequence, "calib.txt")
             )
-            P = calib["P2"]
+            P = calib["P2"] # cam0_2_cam2pixel
 
             T_cam0_2_cam2 = calib['T_cam0_2_cam2']
             T_cam2_2_cam0 = np.linalg.inv(T_cam0_2_cam2)
@@ -411,7 +419,27 @@ class Kitti_One_Frame:
         lidar2prevImg = img2prevImg @ lidar2img
         lidar2nextImg = img2nextImg @ lidar2img
         
-
+        if self.render_type == '3dgs':
+            K_render = intrinsic.copy()
+            K_render[0, :] *= (self.render_w / self.img_W)
+            K_render[1, :] *= (self.render_h / self.img_H)
+            
+            cam2prevcam = anchor_scan['T_cam0_2_cam2'] @ \
+                np.linalg.inv(anchor_scan['prev_poses'][anchor_prev]) @ \
+                anchor_scan['pose'] @ \
+                anchor_scan['T_cam2_2_cam0']
+            
+            cam2nextcam = anchor_scan['T_cam0_2_cam2'] @ \
+                np.linalg.inv(anchor_scan['next_poses'][anchor_next]) @ \
+                anchor_scan['pose'] @ \
+                anchor_scan['T_cam2_2_cam0']
+            img_metas.update({
+                "K_render":[K_render],
+                ("cam_T_cam", -1): [cam2prevcam],
+                ("cam_T_cam", 1): [cam2nextcam],
+                ("K", 0, 0): [intrinsic],
+                ("inv_K", 0, 0): [np.linalg.inv(intrinsic)],
+            })
         img_metas.update({
             'lidar2img': np.expand_dims(lidar2img, axis=0),
             'img2lidar': [img2lidar],
@@ -425,10 +453,9 @@ class Kitti_One_Frame:
             'lidar2nextLidar': [lidar2nextLidar],
             'lidar2prevImg': [lidar2prevImg],
             'lidar2nextImg': [lidar2nextImg],
-            'T_cam2_2_velo_transxy':[self.transxy @ np.linalg.inv(scan['T_velo_2_cam'])],
-            'T_cam2_2_velo':[np.linalg.inv(scan['T_velo_2_cam'])],
-            'K': [intrinsic],
-            'inv_K': [np.linalg.inv(intrinsic)],
+            'T_cam_2_lidar':[self.transxy @ np.linalg.inv(scan['T_velo_2_cam'])],
+            # 'T_cam2_2_velo':[np.linalg.inv(scan['T_velo_2_cam'])],
+            
         })
 
         return img_metas
@@ -446,14 +473,14 @@ class Kitti_One_Frame:
 
     def __getitem__(self, index):
         ### 1. get color, temporal_depth choice if necessary
-        if random.random() < self.cur_prob:
-            temporal_supervision = 'curr'
-        elif random.random() < self.prev_prob:
-            temporal_supervision = 'prev'
-        else:
-            temporal_supervision = 'next'
+        # if random.random() < self.cur_prob:
+        #     temporal_supervision = 'curr'
+        # elif random.random() < self.prev_prob:
+        #     temporal_supervision = 'prev'
+        # else:
+        #     temporal_supervision = 'next'
             
-        # temporal_supervision = 'curr'
+        temporal_supervision = 'curr'
         
         #### 2. get self, prev, next infos for the stem, and also temp_depth info
         while True:

@@ -375,7 +375,7 @@ class NeRFAccHead(BaseTaskHead):
             xs[None, :, None].expand(H, W, D),
             ys[:, None, None].expand(H, W, D),
             zs[None, None, :].expand(H, W, D)
-        ], dim=-1).flatten(0, 2)
+        ], dim=-1).flatten(0, 2) # H(Y),W(X),D(z),3(xyz)
 
         if shift:
             random_shift = torch.rand_like(xyzs) * resolution

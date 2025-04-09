@@ -166,14 +166,21 @@ def main(local_rank, args):
                     metas=img_metas,
                     aabb=[-25.6, 0, -2.0, 25.6, 51.2, 4.4],
                     resolution=args.resolution,
-                    occ_only=True)
+                    occ_only=True,
+                    is_train=False)
                 
-                pred_occ = (result_dict['sdf'] <= args.thresh).to(torch.int)
-                vis_dic['pred_voxel_raw'] = pred_occ.detach().cpu().numpy()
+                if args.render_type == "3dgs":
+                    pred_occ = result_dict['pred_occ_logits'][0, -1].sigmoid() # X,Y,Z
+                    pred_occ = pred_occ.permute(1, 0, 2)#1,X,Y,Z --> 1,Y,X,Z
+                    pred_occ = 1.0 - pred_occ # last_free: pred_occ is free space prob, so (1-pred_occ) is occupied space prob
+                    pred_occ = (pred_occ > 0.6).to(torch.int)
+                else:
+                    pred_occ = (result_dict['sdf'] <= args.thresh).to(torch.int)
+                vis_dic['pred_voxel_raw'] = pred_occ.detach().cpu().numpy() # H,W,D
                 # gt_occ_raw for scenerf style iou calculation
                 # gt_occ for my own evaluation
                 gt_occ_raw = torch.from_numpy(read_semantic_kitti(img_metas[0])).cuda()
-                vis_dic['gt_voxel_raw_no_flip'] = gt_occ_raw.detach().cpu().numpy()
+                vis_dic['gt_voxel_raw_no_flip'] = gt_occ_raw.detach().cpu().numpy() # X.Y.Z
                 gt_occ_raw = torch.flip(gt_occ_raw, [1]) # 沿y轴翻转？
                 gt_occ = gt_occ_raw.clone() # gt_occ = np.copy(gt_occ_raw)
                 gt_occ[gt_occ == 255] = 0
@@ -204,8 +211,8 @@ def main(local_rank, args):
                     vis_dic['pred_voxel'] = pred_occ.detach().cpu().numpy()
                     vis_dic['gt_voxel_raw'] = gt_occ_raw.detach().cpu().numpy()
                     vis_dic['gt_voxel'] = gt_occ.detach().cpu().numpy()
-                    vis_dic['pose_spatial'] = img_metas[0]['T_cam2_2_velo']
-                    vis_dic['pose_spatial_transxy'] = img_metas[0]['T_cam2_2_velo_transxy']
+                    # vis_dic['pose_spatial'] = img_metas[0]['T_cam2_2_velo']
+                    vis_dic['pose_spatial'] = img_metas[0]['T_cam_2_lidar']
                     vis_dic['save_path'] = pred_save_path
                     
                     np.save(pred_save_path, vis_dic)
@@ -256,6 +263,7 @@ if __name__ == '__main__':
     parser.add_argument('--thresh', type=float, default=0)
     parser.add_argument('--sem', action='store_true', default=False)
     parser.add_argument('--save-occ', action='store_true', default=False)
+    parser.add_argument('--render_type', type=str, default='volume_render')
     args = parser.parse_args()
     
     ngpus = torch.cuda.device_count()

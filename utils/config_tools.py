@@ -58,7 +58,8 @@ def modify_for_eval(cfg, dataset='nuscenes', novel_depth=False, args=None):
     cfg.train_wrapper_config['phase'] = 'val'
     cfg.train_wrapper_config['use_flip'] = False
     cfg.loss['loss_cfgs'][0]['ray_resize'] = num_rays
-    cfg.loss['loss_cfgs'][1]['ray_resize'] = num_rays
+    if len(cfg.loss['loss_cfgs']) > 1:
+        cfg.loss['loss_cfgs'][1]['ray_resize'] = num_rays
 
     cfg.model.head.update(dict(
         ray_sample_mode = 'fixed',

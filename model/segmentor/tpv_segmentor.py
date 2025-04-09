@@ -92,6 +92,7 @@ class TPVSegmentor(CustomBaseSegmentor):
                 extra_backbone=False,
                 occ_only=False,
                 prepare=False,
+                is_train=True,
                 **kwargs,
         ):
         """Forward training function.
@@ -102,7 +103,8 @@ class TPVSegmentor(CustomBaseSegmentor):
         results = {
             'imgs': imgs,
             'metas': metas,
-            'points': points
+            'points': points,
+            'is_train': is_train,
         }
         results.update(kwargs) # kwargs 更新到 results
         outs = self.extract_img_feat(**results)

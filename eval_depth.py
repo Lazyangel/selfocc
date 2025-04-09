@@ -130,6 +130,7 @@ def main(local_rank, args):
     logger.info('resume from: ' + cfg.resume_from)
     logger.info('work dir: ' + args.work_dir)
 
+    print(osp.exists(cfg.resume_from))
     if cfg.resume_from and osp.exists(cfg.resume_from):
         map_location = 'cpu'
         ckpt = torch.load(cfg.resume_from, map_location=map_location)
@@ -182,13 +183,17 @@ def main(local_rank, args):
                     for i_meta, meta in enumerate(img_metas):
                         meta.update(pose_dict[i_meta])
 
-                my_model(imgs=input_imgs, metas=img_metas, prepare=True)
-                # result_dict = my_model.module.head.render(metas=img_metas, batch=args.batch)
-                # result_dict = raw_model.head.render(metas=img_metas, batch=args.batch)
-                if distributed:
-                    result_dict = my_model.module.head.render(metas=img_metas, batch=args.batch)
+                if args.render_type == '3dgs':
+                    result_dict = my_model(
+                    imgs=input_imgs, metas=img_metas)
                 else:
-                    result_dict = my_model.head.render(metas=img_metas, batch=args.batch)
+                    my_model(imgs=input_imgs, metas=img_metas, prepare=True)
+                    # result_dict = my_model.module.head.render(metas=img_metas, batch=args.batch)
+                    # result_dict = raw_model.head.render(metas=img_metas, batch=args.batch)
+                    if distributed:
+                        result_dict = my_model.module.head.render(metas=img_metas, batch=args.batch)
+                    else:
+                        result_dict = my_model.head.render(metas=img_metas, batch=args.batch)
                 
                 if args.flip:
                     input_imgs = torch.flip(input_imgs, dims=[-1])
@@ -213,8 +218,11 @@ def main(local_rank, args):
                     result_dict['ms_max_depths'][0] = (result_dict['ms_max_depths'][0] + ms_depths_max_flip) / 2
 
                 #### calculate all sorts of depths
-                ms_depths = result_dict['ms_depths'][0] # B, N, R(107008=176x608)
-                ms_depths = ms_depths.unflatten(-1, cfg.num_rays) # B, N, H(H/2), W(W/2)
+                if 'disp' in result_dict:
+                    ms_depths = result_dict['disp'] # B, N, H(H/2), W(W/2)
+                else:
+                    ms_depths = result_dict['ms_depths'][0] # B, N, R(107008=176x608)
+                    ms_depths = ms_depths.unflatten(-1, cfg.num_rays) # B, N, H(H/2), W(W/2)
 
                 if 'ms_depths_median' in result_dict:
                     ms_depths_median = result_dict['ms_depths_median'][0]
@@ -248,7 +256,7 @@ def main(local_rank, args):
                         # color = cv2.cvtColor(color, cv2.COLOR_RGB2BGR)
                         
                         pred_depth = ms_depth.squeeze(0).cpu().numpy()
-                        pred_depth = 80.0 / pred_depth
+                        pred_depth = 1.0 / pred_depth
                         depth_color = visualize_depth(pred_depth) # H, W, 3
                         # depth_color = depth_color.reshape(depth_H, depth_W, 3)
                         depth_color = cv2.resize(depth_color, (W, H))
@@ -293,6 +301,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', type=str, default='nuscenes')
     parser.add_argument('--batch', type=int, default=0)
     parser.add_argument('--flip', action='store_true', default=False)
+    parser.add_argument('--render_type', type=str, default='volume_render')
     args = parser.parse_args()
     
     ngpus = torch.cuda.device_count()
